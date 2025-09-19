@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <linux/input.h>
 #include <linux/usb/ch9.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -15,6 +16,10 @@
 
 #define VENDOR 0x1d6b
 #define PRODUCT 0x0104
+
+bool volatile keepRunning = true;
+
+void intHandler(int dummy) { keepRunning = false; }
 
 static char report_desc[] = {
     // hid-decode /dev/hidraw0
@@ -36,8 +41,8 @@ static char report_desc[] = {
     0x95, 0x05,       //  Report Count (5)
     0x81, 0x03,       //  Input (Cnst,Var,Abs)
     0xc0,             // End Collection
-    0x85, 0x02,       //  Report ID (2) // seems to be the only one actually reported by the digitizer
-    0x09, 0x20,       //  Usage (Stylus)
+    0x85, 0x02,       //  Report ID (2)  // seems to be the only one actually
+    0x09, 0x20,       //  Usage (Stylus) // reported by the digitizer
     0xa1, 0x00,       //  Collection (Physical)
     0x09, 0x42,       //   Usage (Tip Switch)
     0x09, 0x44,       //   Usage (Barrel Switch)
@@ -420,6 +425,8 @@ static int print_event(struct input_event *ev) {
 }
 
 int main() {
+  signal(SIGINT, intHandler);
+
   usbg_state *s;
   usbg_gadget *g;
   usbg_config *c;
@@ -596,8 +603,9 @@ int main() {
       }
     }
 
-  } while (rc == LIBEVDEV_READ_STATUS_SYNC ||
-           rc == LIBEVDEV_READ_STATUS_SUCCESS || rc == -EAGAIN);
+  } while ((rc == LIBEVDEV_READ_STATUS_SYNC ||
+            rc == LIBEVDEV_READ_STATUS_SUCCESS || rc == -EAGAIN) &&
+           keepRunning);
 
   if (rc != LIBEVDEV_READ_STATUS_SUCCESS && rc != -EAGAIN) {
     fprintf(stderr, "Failed to handle events: %s\n", strerror(-rc));
@@ -605,7 +613,7 @@ int main() {
   }
 out:
 
-  if (bytes < 0) {
+  if (bytes < 0 && errno != EAGAIN) {
     perror("Read failed");
     goto out2;
   }
@@ -616,6 +624,8 @@ out:
 
   ret = 0;
 out2:
+  usbg_disable_gadget(g);
+  usbg_rm_gadget(g, USBG_RM_RECURSE);
   usbg_cleanup(s);
 
 out1:
