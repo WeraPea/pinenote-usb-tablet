@@ -35,6 +35,7 @@
               evtest
               hid-tools
               libconfig
+              libevdev
               libusbgx
               pkg-config
             ];

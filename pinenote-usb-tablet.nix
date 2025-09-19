@@ -1,16 +1,18 @@
 {
   stdenv,
   pkg-config,
-  libusbgx,
   libconfig,
+  libevdev,
+  libusbgx,
 }:
 stdenv.mkDerivation {
   name = "pinenote-usb-tablet";
   src = ./.;
   nativeBuildInputs = [ pkg-config ];
   buildInputs = [
-    libusbgx
     libconfig
+    libevdev
+    libusbgx
   ];
   installPhase = ''
     mkdir -p $out/bin
