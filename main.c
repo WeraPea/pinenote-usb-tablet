@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/hidraw.h>
 #include <linux/input.h>
 #include <linux/usb/ch9.h>
 #include <signal.h>
@@ -14,12 +15,16 @@
 #include <usbg/function/hid.h>
 #include <usbg/usbg.h>
 
-#define VENDOR 0x1d6b
-#define PRODUCT 0x0104
+#define USBG_VENDOR 0x1d6b
+#define USBG_PRODUCT 0x0104
 
-bool volatile keepRunning = true;
+#define W9013_VENDOR 0x2d1f
+#define W9013_PRODUCT 0x0095
 
-void intHandler(int dummy) { keepRunning = false; }
+#define WS8100_PEN_NAME "ws8100_pen"
+
+#define EVIOC_GRAB 1
+#define EVIOC_UNGRAB 0
 
 static char report_desc[] = {
     // hid-decode /dev/hidraw0
@@ -411,28 +416,15 @@ static char report_desc[] = {
     0xc0,             // End Collection
 };
 
-static int print_event(struct input_event *ev) {
-  if (ev->type == EV_SYN)
-    printf("Event: time %ld.%06ld, ++++++++++++++++++++ %s +++++++++++++++\n",
-           ev->input_event_sec, ev->input_event_usec,
-           libevdev_event_type_get_name(ev->type));
-  else
-    printf("Event: time %ld.%06ld, type %d (%s), code %d (%s), value %d\n",
-           ev->input_event_sec, ev->input_event_usec, ev->type,
-           libevdev_event_type_get_name(ev->type), ev->code,
-           libevdev_event_code_get_name(ev->type, ev->code), ev->value);
-  return 0;
-}
-
-int main() {
-  signal(SIGINT, intHandler);
-
+typedef struct {
   usbg_state *s;
   usbg_gadget *g;
   usbg_config *c;
   usbg_function *f_hid;
-  int ret = -EINVAL;
-  int usbg_ret;
+} usbg_context;
+
+int initUSB(usbg_context *usb_ctx) {
+  int usbg_ret = -EINVAL;
 
   struct usbg_gadget_attrs g_attrs = {
       .bcdUSB = 0x0200,
@@ -440,8 +432,8 @@ int main() {
       .bDeviceSubClass = 0x00,
       .bDeviceProtocol = 0x00,
       .bMaxPacketSize0 = 64, /* Max allowed ep0 packet size */
-      .idVendor = VENDOR,
-      .idProduct = PRODUCT,
+      .idVendor = USBG_VENDOR,
+      .idProduct = USBG_PRODUCT,
       .bcdDevice = 0x0100, /* Verson of device */
   };
 
@@ -464,7 +456,7 @@ int main() {
       .subclass = 1,
   };
 
-  usbg_ret = usbg_init("/sys/kernel/config", &s);
+  usbg_ret = usbg_init("/sys/kernel/config", &usb_ctx->s);
   if (usbg_ret != USBG_SUCCESS) {
     fprintf(stderr, "Error on usbg init\n");
     fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
@@ -472,14 +464,16 @@ int main() {
     goto out1;
   }
 
-  usbg_ret = usbg_create_gadget(s, "g1", &g_attrs, &g_strs, &g);
+  usbg_ret =
+      usbg_create_gadget(usb_ctx->s, "g1", &g_attrs, &g_strs, &usb_ctx->g);
   if (usbg_ret != USBG_SUCCESS) {
     fprintf(stderr, "Error creating gadget\n");
     fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
             usbg_strerror(usbg_ret));
     goto out2;
   }
-  usbg_ret = usbg_create_function(g, USBG_F_HID, "usb0", &f_attrs, &f_hid);
+  usbg_ret = usbg_create_function(usb_ctx->g, USBG_F_HID, "usb0", &f_attrs,
+                                  &usb_ctx->f_hid);
   if (usbg_ret != USBG_SUCCESS) {
     fprintf(stderr, "Error creating function\n");
     fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
@@ -487,7 +481,8 @@ int main() {
     goto out2;
   }
 
-  usbg_ret = usbg_create_config(g, 1, "The only one", NULL, &c_strs, &c);
+  usbg_ret = usbg_create_config(usb_ctx->g, 1, "The only one", NULL, &c_strs,
+                                &usb_ctx->c);
   if (usbg_ret != USBG_SUCCESS) {
     fprintf(stderr, "Error creating config\n");
     fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
@@ -495,7 +490,7 @@ int main() {
     goto out2;
   }
 
-  usbg_ret = usbg_add_config_function(c, "some_name", f_hid);
+  usbg_ret = usbg_add_config_function(usb_ctx->c, "some_name", usb_ctx->f_hid);
   if (usbg_ret != USBG_SUCCESS) {
     fprintf(stderr, "Error adding function\n");
     fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
@@ -503,131 +498,201 @@ int main() {
     goto out2;
   }
 
-  usbg_ret = usbg_enable_gadget(g, DEFAULT_UDC);
+  usbg_ret = usbg_enable_gadget(usb_ctx->g, DEFAULT_UDC);
   if (usbg_ret != USBG_SUCCESS) {
     fprintf(stderr, "Error enabling gadget\n");
     fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
             usbg_strerror(usbg_ret));
     goto out2;
   }
+  usbg_ret = 0;
+  goto out1;
 
-  int in_fd, out_fd;
-  unsigned char buffer[15];
+out2:
+  usbg_cleanup(usb_ctx->s);
+  usb_ctx->s = NULL;
+
+out1:
+  return usbg_ret;
+}
+
+int cleanupUSB(usbg_context *usb_ctx) {
+  if (usb_ctx->g) {
+    usbg_disable_gadget(usb_ctx->g);
+    usbg_rm_gadget(usb_ctx->g, USBG_RM_RECURSE);
+  }
+  if (usb_ctx->s) {
+    usbg_cleanup(usb_ctx->s);
+  }
+  return 0;
+}
+
+int find_hidraw_device(char *device, int16_t vid, int16_t pid) {
+  int fd;
+  struct hidraw_devinfo hidinfo;
+  char path[20];
+
+  for (int x = 0; x < 16; x++) {
+    sprintf(path, "/dev/hidraw%d", x);
+
+    if ((fd = open(path, O_RDWR | O_NONBLOCK)) == -1) {
+      continue;
+    }
+
+    ioctl(fd, HIDIOCGRAWINFO, &hidinfo);
+
+    if (hidinfo.vendor == vid && hidinfo.product == pid) {
+      printf("Found %s at: %s\n", device, path);
+      return fd;
+    }
+
+    close(fd);
+  }
+
+  return -1;
+}
+
+int find_evdev_device(char *name, struct libevdev **out_dev) {
+  int fd;
+  char path[20];
+  struct libevdev *dev = NULL;
+
+  for (int x = 0; x < 16; x++) {
+    sprintf(path, "/dev/input/event%d", x);
+
+    if ((fd = open(path, O_RDWR | O_NONBLOCK)) == -1) {
+      continue;
+    }
+
+    if (libevdev_new_from_fd(fd, &dev) < 0) {
+      libevdev_free(dev);
+      continue;
+    };
+    if (strcmp(libevdev_get_name(dev), name) == 0) {
+      printf("Found %s at: %s\n", name, path);
+      *out_dev = dev;
+      return 0;
+    }
+
+    libevdev_free(dev);
+  }
+
+  return -1;
+}
+
+int handle_ws8100_pen_events(struct input_event ev, unsigned char *buttons,
+                             int out_fd) {
+  if (ev.type == EV_KEY) {
+    int bit = -1;
+    switch (ev.code) {
+    case BTN_TOOL_RUBBER:
+      bit = 0;
+      break;
+    case BTN_TOOL_PEN:
+      bit = 1;
+      break;
+    case BTN_STYLUS3:
+      bit = 2;
+      break;
+    }
+    if (bit >= 0) {
+      if (ev.value) {
+        buttons[1] |= 1 << bit;
+      } else {
+        buttons[1] &= ~(1 << bit);
+      }
+      if (write(out_fd, buttons, 2) != 2) {
+        perror("Write failed");
+        return -1;
+      }
+    }
+  }
+  return 0;
+}
+
+bool volatile keepRunning = true;
+
+void intHandler(int dummy) { keepRunning = false; }
+
+int main() {
+  signal(SIGINT, intHandler);
+
+  int w9013, out_fd;
+  unsigned char w9013_buffer[15];
   ssize_t bytes;
+  int evdev_rc = 1;
+  unsigned char buttons[2] = {1, 0};
 
-  in_fd = open("/dev/hidraw0", O_RDONLY | O_NONBLOCK);
-  if (in_fd < 0) {
-    perror("Failed to open /dev/hidraw0");
-    goto out2;
+  usbg_context usb_ctx = {0};
+
+  struct libevdev *ws8100_pen = NULL;
+
+  if (initUSB(&usb_ctx) < 0) {
+    fprintf(stderr, "Failed to init usb gadget");
+    goto out4;
+  }
+
+  w9013 = find_hidraw_device("w9013 digitizer", W9013_VENDOR, W9013_PRODUCT);
+  if (w9013 < 0) {
+    fprintf(stderr, "Failed to find w9013 digitizer");
+    goto out4;
   }
 
   out_fd = open("/dev/hidg0", O_WRONLY);
   if (out_fd < 0) {
     perror("Failed to open /dev/hidg0");
-    close(in_fd);
+    goto out3;
+  }
+
+  evdev_rc = find_evdev_device(WS8100_PEN_NAME, &ws8100_pen);
+  if (evdev_rc < 0) {
+    fprintf(stderr, "Failed to find ws8100_pen");
     goto out2;
   }
-
-  unsigned char buttons[2] = {1, 0};
-
-  struct libevdev *dev = NULL;
-  const char *file;
-  int fd;
-  int rc = 1;
-
-  file = "/dev/input/event6";
-  fd = open(file, O_RDONLY | O_NONBLOCK);
-  if (fd < 0) {
-    perror("Failed to open device");
-    goto out;
-  }
-
-  rc = libevdev_new_from_fd(fd, &dev);
-  if (rc < 0) {
-    fprintf(stderr, "Failed to init libevdev (%s)\n", strerror(-rc));
-    goto out;
-  }
-
-  printf("Input device ID: bus %#x vendor %#x product %#x\n",
-         libevdev_get_id_bustype(dev), libevdev_get_id_vendor(dev),
-         libevdev_get_id_product(dev));
-  printf("Evdev version: %x\n", libevdev_get_driver_version(dev));
-  printf("Input device name: \"%s\"\n", libevdev_get_name(dev));
-  printf("Phys location: %s\n", libevdev_get_phys(dev));
-  printf("Uniq identifier: %s\n", libevdev_get_uniq(dev));
 
   do {
-    if (libevdev_has_event_pending(dev)) {
+    if (libevdev_has_event_pending(ws8100_pen)) {
       struct input_event ev;
-      rc = libevdev_next_event(dev, LIBEVDEV_READ_FLAG_NORMAL, &ev);
-      if (rc == LIBEVDEV_READ_STATUS_SYNC) {
+      evdev_rc =
+          libevdev_next_event(ws8100_pen, LIBEVDEV_READ_FLAG_NORMAL, &ev);
+      if (evdev_rc == LIBEVDEV_READ_STATUS_SYNC) {
         printf("::::::::::::::::::::: dropped ::::::::::::::::::::::\n");
-        while (rc == LIBEVDEV_READ_STATUS_SYNC) {
-          rc = libevdev_next_event(dev, LIBEVDEV_READ_FLAG_SYNC, &ev);
+        while (evdev_rc == LIBEVDEV_READ_STATUS_SYNC) {
+          evdev_rc =
+              libevdev_next_event(ws8100_pen, LIBEVDEV_READ_FLAG_SYNC, &ev);
+          handle_ws8100_pen_events(ev, buttons, out_fd);
         }
         printf("::::::::::::::::::::: re-synced ::::::::::::::::::::::\n");
-      } else if (rc == LIBEVDEV_READ_STATUS_SUCCESS) {
-        // print_event(&ev);
-        if (ev.type == EV_KEY) {
-          int bit = -1;
-          switch (ev.code) {
-          case BTN_TOOL_RUBBER:
-            bit = 0;
-            break;
-          case BTN_TOOL_PEN:
-            bit = 1;
-            break;
-          case BTN_STYLUS3:
-            bit = 2;
-            break;
-          }
-          if (bit >= 0) {
-            if (ev.value) {
-              buttons[1] |= 1 << bit;
-            } else {
-              buttons[1] &= ~(1 << bit);
-            }
-            printf("%08b\n", buttons[1]);
-            if (write(out_fd, &buttons, 2) != 2) {
-              perror("Write failed");
-              goto out;
-            }
-          }
-        }
+      } else if (evdev_rc == LIBEVDEV_READ_STATUS_SUCCESS) {
+        handle_ws8100_pen_events(ev, buttons, out_fd);
       }
     }
-    if ((bytes = read(in_fd, buffer, sizeof(buffer))) > 0) {
-      if (write(out_fd, buffer, bytes) != bytes) {
+    if ((bytes = read(w9013, w9013_buffer, sizeof(w9013_buffer))) > 0) {
+      if (write(out_fd, w9013_buffer, bytes) != bytes) {
         perror("Write failed");
-        goto out;
+        goto out1;
       }
     }
+  } while (keepRunning &&
+           (evdev_rc == LIBEVDEV_READ_STATUS_SYNC ||
+            evdev_rc == LIBEVDEV_READ_STATUS_SUCCESS || evdev_rc == -EAGAIN));
 
-  } while ((rc == LIBEVDEV_READ_STATUS_SYNC ||
-            rc == LIBEVDEV_READ_STATUS_SUCCESS || rc == -EAGAIN) &&
-           keepRunning);
-
-  if (rc != LIBEVDEV_READ_STATUS_SUCCESS && rc != -EAGAIN) {
-    fprintf(stderr, "Failed to handle events: %s\n", strerror(-rc));
-    goto out;
+  if (evdev_rc != LIBEVDEV_READ_STATUS_SUCCESS && evdev_rc != -EAGAIN) {
+    fprintf(stderr, "Failed to handle events: %s\n", strerror(-evdev_rc));
+    goto out1;
   }
-out:
-
-  if (bytes < 0 && errno != EAGAIN) {
-    perror("Read failed");
-    goto out2;
-  }
-
-  libevdev_free(dev);
-  close(in_fd);
-  close(out_fd);
-
-  ret = 0;
-out2:
-  usbg_disable_gadget(g);
-  usbg_rm_gadget(g, USBG_RM_RECURSE);
-  usbg_cleanup(s);
 
 out1:
-  return ret;
+  if (bytes < 0 && errno != EAGAIN) {
+    perror("Read failed");
+  }
+
+  libevdev_free(ws8100_pen);
+out2:
+  close(out_fd);
+out3:
+  close(w9013);
+out4:
+  cleanupUSB(&usb_ctx);
+  return evdev_rc;
 }
