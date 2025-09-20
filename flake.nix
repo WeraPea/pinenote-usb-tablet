@@ -24,6 +24,9 @@
         pinenote-usb-tablet = pkgsBySystem.${system}.callPackage ./pinenote-usb-tablet.nix { };
         default = pinenote-usb-tablet;
       });
+      overlays.default = final: prev: {
+        pinenote-usb-tablet = self.packages.${final.system}.pinenote-usb-tablet;
+      };
       devShells = eachSystem (
         system:
         let
@@ -44,3 +47,4 @@
       );
     };
 }
+
