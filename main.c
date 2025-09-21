@@ -23,9 +23,6 @@
 
 #define WS8100_PEN_NAME "ws8100_pen"
 
-#define EVIOC_GRAB 1
-#define EVIOC_UNGRAB 0
-
 static char report_desc[] = {
     // hid-decode /dev/hidraw0
     // w9013 2D1F:0095
@@ -35,17 +32,19 @@ static char report_desc[] = {
     0x85, 0x01,       //  Report ID (1) // added in for bluetooth pen buttons
     0x09, 0x20,       //  Usage (Stylus)
     0xa1, 0x00,       //  Collection (Physical)
-    0x09, 0x42,       //  Usage (Tip Switch)
-    0x09, 0x44,       //  Usage (Barrel Switch)
-    0x09, 0x45,       //  Usage (Eraser)
-    0x15, 0x00,       //  Logical Minimum (0)
-    0x25, 0x01,       //  Logical Maximum (1)
-    0x75, 0x01,       //  Report Size (1)
-    0x95, 0x03,       //  Report Count (3)
-    0x81, 0x02,       //  Input (Data,Var,Abs)
-    0x95, 0x05,       //  Report Count (5)
-    0x81, 0x03,       //  Input (Cnst,Var,Abs)
-    0xc0,             // End Collection
+    0x09, 0x44,       //   Usage (Barrel Switch)
+    0x09, 0x5a,       //   Usage (Secondary Barrel Switch)
+    0x09, 0x45,       //   Usage (Eraser)
+    0x09, 0x00,       //   Usage (Undefined)
+    0x09, 0x00,       //   Usage (Undefined)
+    0x15, 0x00,       //   Logical Minimum (0)
+    0x25, 0x01,       //   Logical Maximum (1)
+    0x75, 0x01,       //   Report Size (1)
+    0x95, 0x05,       //   Report Count (5)
+    0x81, 0x02,       //   Input (Data,Var,Abs)
+    0x95, 0x03,       //   Report Count (3)
+    0x81, 0x03,       //   Input (Cnst,Var,Abs)
+    0xc0,             //  End Collection
     0x85, 0x02,       //  Report ID (2)  // seems to be the only one actually
     0x09, 0x20,       //  Usage (Stylus) // reported by the digitizer
     0xa1, 0x00,       //  Collection (Physical)
@@ -584,19 +583,41 @@ int handle_ws8100_pen_events(struct input_event ev, unsigned char *buttons,
                              int out_fd) {
   if (ev.type == EV_KEY) {
     int bit = -1;
+    bool invert = false; // used for when double press event is passed between
+                         // tool down and up to reproduce it with one output
+                         // instead of two.
+                         // (see drivers/input/misc/ws8100-pen.c
+                         // of the kernel)
     switch (ev.code) {
-    case BTN_TOOL_RUBBER:
+    case BTN_TOOL_RUBBER: // button 1 press and release, except it is kept
+                          // pressed during double press
       bit = 0;
       break;
-    case BTN_TOOL_PEN:
+    case KEY_MACRO1: // button 1 double press
+      bit = 0;
+      invert = true;
+      break;
+    case BTN_TOOL_PEN: // button 2 press and release, except it is kept pressed
+                       // during double press
       bit = 1;
       break;
-    case BTN_STYLUS3:
+    case KEY_MACRO2: // button 2 double press
+      bit = 1;
+      invert = true;
+      break;
+    case BTN_STYLUS3: // button 3 short press
       bit = 2;
       break;
+    case KEY_SLEEP: // button 3 long press
+      bit = 3;
+      break;
+    case KEY_MACRO3: // button 3 double press
+      bit = 4;
+      break;
     }
+
     if (bit >= 0) {
-      if (ev.value) {
+      if (ev.value ^ invert) {
         buttons[1] |= 1 << bit;
       } else {
         buttons[1] &= ~(1 << bit);
@@ -649,6 +670,11 @@ int main() {
     fprintf(stderr, "Failed to find ws8100_pen");
     goto out2;
   }
+  evdev_rc = libevdev_grab(ws8100_pen, LIBEVDEV_GRAB);
+  if (evdev_rc < 0) {
+    fprintf(stderr, "Failed to grab ws8100_pen");
+    goto out1;
+  }
 
   do {
     if (libevdev_has_event_pending(ws8100_pen)) {
@@ -687,7 +713,10 @@ out1:
     perror("Read failed");
   }
 
+  libevdev_grab(ws8100_pen, LIBEVDEV_UNGRAB);
+  int ws8100_pen_fd = libevdev_get_fd(ws8100_pen);
   libevdev_free(ws8100_pen);
+  close(ws8100_pen_fd);
 out2:
   close(out_fd);
 out3:
