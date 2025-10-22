@@ -6,6 +6,7 @@
 #include <linux/hidraw.h>
 #include <linux/input.h>
 #include <linux/usb/ch9.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,7 +18,6 @@
 
 #define USBG_VENDOR 0x1d6b
 #define USBG_PRODUCT 0x0104
-
 #define W9013_VENDOR 0x2d1f
 #define W9013_PRODUCT 0x0095
 
@@ -435,15 +435,12 @@ int initUSB(usbg_context *usb_ctx) {
       .idProduct = USBG_PRODUCT,
       .bcdDevice = 0x0100, /* Verson of device */
   };
-
   struct usbg_gadget_strs g_strs = {
       .serial = "fedcba9876543210", /* Serial number */
       .manufacturer = "Pine64",     /* Manufacturer */
       .product = "PineNote"         /* Product string */
   };
-
   struct usbg_config_strs c_strs = {.configuration = "1xHID"};
-
   struct usbg_f_hid_attrs f_attrs = {
       .protocol = 2,
       .report_desc =
@@ -462,7 +459,6 @@ int initUSB(usbg_context *usb_ctx) {
             usbg_strerror(usbg_ret));
     goto out1;
   }
-
   usbg_ret =
       usbg_create_gadget(usb_ctx->s, "g1", &g_attrs, &g_strs, &usb_ctx->g);
   if (usbg_ret != USBG_SUCCESS) {
@@ -479,7 +475,6 @@ int initUSB(usbg_context *usb_ctx) {
             usbg_strerror(usbg_ret));
     goto out2;
   }
-
   usbg_ret = usbg_create_config(usb_ctx->g, 1, "The only one", NULL, &c_strs,
                                 &usb_ctx->c);
   if (usbg_ret != USBG_SUCCESS) {
@@ -488,7 +483,6 @@ int initUSB(usbg_context *usb_ctx) {
             usbg_strerror(usbg_ret));
     goto out2;
   }
-
   usbg_ret = usbg_add_config_function(usb_ctx->c, "some_name", usb_ctx->f_hid);
   if (usbg_ret != USBG_SUCCESS) {
     fprintf(stderr, "Error adding function\n");
@@ -496,7 +490,6 @@ int initUSB(usbg_context *usb_ctx) {
             usbg_strerror(usbg_ret));
     goto out2;
   }
-
   usbg_ret = usbg_enable_gadget(usb_ctx->g, DEFAULT_UDC);
   if (usbg_ret != USBG_SUCCESS) {
     fprintf(stderr, "Error enabling gadget\n");
@@ -539,7 +532,6 @@ int find_hidraw_device(char *device, int16_t vid, int16_t pid) {
     }
 
     ioctl(fd, HIDIOCGRAWINFO, &hidinfo);
-
     if (hidinfo.vendor == vid && hidinfo.product == pid) {
       printf("Found %s at: %s\n", device, path);
       return fd;
@@ -562,7 +554,6 @@ int find_evdev_device(char *name, struct libevdev **out_dev) {
     if ((fd = open(path, O_RDWR | O_NONBLOCK)) == -1) {
       continue;
     }
-
     if (libevdev_new_from_fd(fd, &dev) < 0) {
       libevdev_free(dev);
       continue;
@@ -638,16 +629,13 @@ void intHandler(int dummy) { keepRunning = false; }
 int main() {
   signal(SIGINT, intHandler);
 
-  int w9013, out_fd;
+  int w9013, out_fd, evdev_rc, ws8100_pen_fd;
   unsigned char w9013_buffer[15];
-  ssize_t bytes;
-  int evdev_rc = 1;
+  ssize_t bytes = 0;
   unsigned char buttons[2] = {1, 0};
-
   usbg_context usb_ctx = {0};
 
   struct libevdev *ws8100_pen = NULL;
-
   if (initUSB(&usb_ctx) < 0) {
     fprintf(stderr, "Failed to init usb gadget");
     goto out4;
@@ -670,51 +658,63 @@ int main() {
     fprintf(stderr, "Failed to find ws8100_pen");
     goto out2;
   }
+
+  ws8100_pen_fd = libevdev_get_fd(ws8100_pen);
   evdev_rc = libevdev_grab(ws8100_pen, LIBEVDEV_GRAB);
   if (evdev_rc < 0) {
     fprintf(stderr, "Failed to grab ws8100_pen");
     goto out1;
   }
 
-  do {
-    if (libevdev_has_event_pending(ws8100_pen)) {
-      struct input_event ev;
-      evdev_rc =
-          libevdev_next_event(ws8100_pen, LIBEVDEV_READ_FLAG_NORMAL, &ev);
-      if (evdev_rc == LIBEVDEV_READ_STATUS_SYNC) {
-        printf("::::::::::::::::::::: dropped ::::::::::::::::::::::\n");
-        while (evdev_rc == LIBEVDEV_READ_STATUS_SYNC) {
-          evdev_rc =
-              libevdev_next_event(ws8100_pen, LIBEVDEV_READ_FLAG_SYNC, &ev);
-          handle_ws8100_pen_events(ev, buttons, out_fd);
-        }
-        printf("::::::::::::::::::::: re-synced ::::::::::::::::::::::\n");
-      } else if (evdev_rc == LIBEVDEV_READ_STATUS_SUCCESS) {
-        handle_ws8100_pen_events(ev, buttons, out_fd);
-      }
+  struct pollfd fds[2] = {
+      {.fd = ws8100_pen_fd, .events = POLLIN},
+      {.fd = w9013, .events = POLLIN},
+  };
+
+  while (keepRunning) {
+    int r = poll(fds, 2, -1);
+    if (r < 0) {
+      if (errno == EINTR)
+        continue;
+      perror("Failed to poll for events");
+      break;
     }
-    if ((bytes = read(w9013, w9013_buffer, sizeof(w9013_buffer))) > 0) {
-      if (write(out_fd, w9013_buffer, bytes) != bytes) {
-        perror("Write failed");
+    if (fds[0].revents & POLLIN) {
+      struct input_event ev;
+      do {
+        evdev_rc =
+            libevdev_next_event(ws8100_pen, LIBEVDEV_READ_FLAG_NORMAL, &ev);
+        if (evdev_rc == LIBEVDEV_READ_STATUS_SYNC) {
+          printf("::::::::::::::::::::: dropped ::::::::::::::::::::::\n");
+          while (evdev_rc == LIBEVDEV_READ_STATUS_SYNC) {
+            evdev_rc =
+                libevdev_next_event(ws8100_pen, LIBEVDEV_READ_FLAG_SYNC, &ev);
+            handle_ws8100_pen_events(ev, buttons, out_fd);
+          }
+          printf("::::::::::::::::::::: re-synced ::::::::::::::::::::::\n");
+        } else if (evdev_rc == LIBEVDEV_READ_STATUS_SUCCESS) {
+          handle_ws8100_pen_events(ev, buttons, out_fd);
+        } else {
+          fprintf(stderr, "Failed to handle events: %s\n", strerror(-evdev_rc));
+          goto out1;
+        }
+      } while (libevdev_has_event_pending(ws8100_pen));
+    }
+    if (fds[1].revents & POLLIN) {
+      while ((bytes = read(w9013, w9013_buffer, sizeof(w9013_buffer))) > 0) {
+        if (write(out_fd, w9013_buffer, bytes) != bytes) {
+          perror("Write failed");
+          goto out1;
+        }
+      }
+      if (bytes < 0 && errno != EAGAIN) {
+        perror("Read failed");
         goto out1;
       }
     }
-  } while (keepRunning &&
-           (evdev_rc == LIBEVDEV_READ_STATUS_SYNC ||
-            evdev_rc == LIBEVDEV_READ_STATUS_SUCCESS || evdev_rc == -EAGAIN));
-
-  if (evdev_rc != LIBEVDEV_READ_STATUS_SUCCESS && evdev_rc != -EAGAIN) {
-    fprintf(stderr, "Failed to handle events: %s\n", strerror(-evdev_rc));
-    goto out1;
   }
-
 out1:
-  if (bytes < 0 && errno != EAGAIN) {
-    perror("Read failed");
-  }
-
   libevdev_grab(ws8100_pen, LIBEVDEV_UNGRAB);
-  int ws8100_pen_fd = libevdev_get_fd(ws8100_pen);
   libevdev_free(ws8100_pen);
   close(ws8100_pen_fd);
 out2:
