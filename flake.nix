@@ -25,7 +25,7 @@
         default = pinenote-usb-tablet;
       });
       overlays.default = final: prev: {
-        pinenote-usb-tablet = self.packages.${final.system}.pinenote-usb-tablet;
+        pinenote-usb-tablet = self.packages.${final.stdenv.hostPlatform.system}.pinenote-usb-tablet;
       };
       devShells = eachSystem (
         system:
