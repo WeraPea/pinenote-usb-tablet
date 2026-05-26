@@ -16,8 +16,8 @@
 #include <usbg/function/hid.h>
 #include <usbg/usbg.h>
 
-#define USBG_VENDOR 0x1d6b
-#define USBG_PRODUCT 0x0104
+#define USBG_VENDOR 0x2d1f
+#define USBG_PRODUCT 0x0095
 #define W9013_VENDOR 0x2d1f
 #define W9013_PRODUCT 0x0095
 
