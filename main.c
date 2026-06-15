@@ -7,6 +7,7 @@
 #include <linux/input.h>
 #include <linux/usb/ch9.h>
 #include <poll.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -22,6 +23,8 @@
 #define W9013_PRODUCT 0x0095
 
 #define WS8100_PEN_NAME "ws8100_pen"
+#define CYTTSP5_NAME "cyttsp5"
+#define W9013_NAME "w9013 2D1F:0095 Stylus"
 
 static char report_desc[] = {
     // hid-decode /dev/hidraw0
@@ -124,296 +127,70 @@ static char report_desc[] = {
     0x75, 0x08,       //  Report Size (8)
     0x26, 0xff, 0x00, //  Logical Maximum (255)
     0xb1, 0x12,       //  Feature (Data,Var,Abs,NonLin)
-    0x85, 0x03,       //  Report ID (3)
-    0x09, 0x00,       //  Usage (Undefined)
-    0x95, 0x12,       //  Report Count (18)
-    0xb1, 0x12,       //  Feature (Data,Var,Abs,NonLin)
-    0x85, 0x04,       //  Report ID (4)
-    0x09, 0x00,       //  Usage (Undefined)
-    0xb1, 0x02,       //  Feature (Data,Var,Abs)
-    0x85, 0x05,       //  Report ID (5)
-    0x09, 0x00,       //  Usage (Undefined)
-    0x95, 0x04,       //  Report Count (4)
-    0xb1, 0x02,       //  Feature (Data,Var,Abs)
-    0x85, 0x06,       //  Report ID (6)
-    0x09, 0x00,       //  Usage (Undefined)
-    0x95, 0x24,       //  Report Count (36)
-    0xb1, 0x02,       //  Feature (Data,Var,Abs)
-    0x85, 0x16,       //  Report ID (22)
-    0x09, 0x00,       //  Usage (Undefined)
-    0x15, 0x00,       //  Logical Minimum (0)
-    0x26, 0xff, 0x00, //  Logical Maximum (255)
-    0x95, 0x06,       //  Report Count (6)
-    0xb1, 0x02,       //  Feature (Data,Var,Abs)
-    0x85, 0x17,       //  Report ID (23)
-    0x09, 0x00,       //  Usage (Undefined)
-    0x95, 0x0c,       //  Report Count (12)
-    0xb1, 0x02,       //  Feature (Data,Var,Abs)
-    0x85, 0x19,       //  Report ID (25)
-    0x09, 0x00,       //  Usage (Undefined)
-    0x95, 0x01,       //  Report Count (1)
-    0xb1, 0x02,       //  Feature (Data,Var,Abs)
-    0xc0,             // End Collection
-    0x06, 0x00, 0xff, // Usage Page (Vendor Defined Page 1)
-    0x09, 0x00,       // Usage (Undefined)
-    0xa1, 0x01,       // Collection (Application)
-    0x85, 0x09,       //  Report ID (9)
-    0x05, 0x0d,       //  Usage Page (Digitizers)
-    0x09, 0x20,       //  Usage (Stylus)
-    0xa1, 0x00,       //  Collection (Physical)
-    0x09, 0x42,       //   Usage (Tip Switch)
-    0x09, 0x44,       //   Usage (Barrel Switch)
-    0x09, 0x45,       //   Usage (Eraser)
-    0x09, 0x3c,       //   Usage (Invert)
-    0x09, 0x00,       //   Usage (Undefined)
-    0x09, 0x32,       //   Usage (In Range)
-    0x15, 0x00,       //   Logical Minimum (0)
-    0x25, 0x01,       //   Logical Maximum (1)
-    0x75, 0x01,       //   Report Size (1)
-    0x95, 0x06,       //   Report Count (6)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x95, 0x02,       //   Report Count (2)
-    0x81, 0x03,       //   Input (Cnst,Var,Abs)
-    0x05, 0x01,       //   Usage Page (Generic Desktop)
-    0x09, 0x30,       //   Usage (X)
-    0x26, 0xe6, 0x51, //   Logical Maximum (20966)
-    0x46, 0xe6, 0x51, //   Physical Maximum (20966)
-    0x65, 0x11,       //   Unit (SILinear: cm)
-    0x55, 0x0d,       //   Unit Exponent (-3)
-    0x75, 0x10,       //   Report Size (16)
-    0x95, 0x01,       //   Report Count (1)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x09, 0x31,       //   Usage (Y)
-    0x26, 0x6d, 0x3d, //   Logical Maximum (15725)
-    0x46, 0x6d, 0x3d, //   Physical Maximum (15725)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x45, 0x00,       //   Physical Maximum (0)
-    0x65, 0x00,       //   Unit (None)
-    0x55, 0x00,       //   Unit Exponent (0)
-    0x05, 0x0d,       //   Usage Page (Digitizers)
-    0x09, 0x30,       //   Usage (Tip Pressure)
-    0x26, 0xff, 0x0f, //   Logical Maximum (4095)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x06, 0x00, 0xff, //   Usage Page (Vendor Defined Page 1)
-    0x09, 0x04,       //   Usage (Vendor Usage 0x04)
-    0x75, 0x08,       //   Report Size (8)
-    0x26, 0xff, 0x00, //   Logical Maximum (255)
-    0x46, 0xff, 0x00, //   Physical Maximum (255)
-    0x65, 0x11,       //   Unit (SILinear: cm)
-    0x55, 0x0e,       //   Unit Exponent (-2)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x05, 0x0d,       //   Usage Page (Digitizers)
-    0x09, 0x3d,       //   Usage (X Tilt)
-    0x75, 0x10,       //   Report Size (16)
-    0x16, 0xd8, 0xdc, //   Logical Minimum (-9000)
-    0x26, 0x28, 0x23, //   Logical Maximum (9000)
-    0x36, 0xd8, 0xdc, //   Physical Minimum (-9000)
-    0x46, 0x28, 0x23, //   Physical Maximum (9000)
-    0x65, 0x14,       //   Unit (EnglishRotation: deg)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x09, 0x3e,       //   Usage (Y Tilt)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x65, 0x00,       //   Unit (None)
-    0x55, 0x00,       //   Unit Exponent (0)
-    0x15, 0x00,       //   Logical Minimum (0)
-    0x35, 0x00,       //   Physical Minimum (0)
-    0x45, 0x00,       //   Physical Maximum (0)
-    0xc0,             //  End Collection
-    0x09, 0x00,       //  Usage (Undefined)
-    0x75, 0x08,       //  Report Size (8)
-    0x95, 0x03,       //  Report Count (3)
-    0x26, 0xff, 0x00, //  Logical Maximum (255)
-    0xb1, 0x12,       //  Feature (Data,Var,Abs,NonLin)
-    0xc0,             // End Collection
-    0x06, 0x00, 0xff, // Usage Page (Vendor Defined Page 1)
-    0x09, 0x02,       // Usage (Vendor Usage 2)
-    0xa1, 0x01,       // Collection (Application)
-    0x85, 0x07,       //  Report ID (7)
-    0x09, 0x00,       //  Usage (Undefined)
-    0x96, 0x09, 0x01, //  Report Count (265)
-    0xb1, 0x02,       //  Feature (Data,Var,Abs)
-    0x85, 0x08,       //  Report ID (8)
-    0x09, 0x00,       //  Usage (Undefined)
-    0x95, 0x03,       //  Report Count (3)
-    0x81, 0x02,       //  Input (Data,Var,Abs)
-    0x09, 0x00,       //  Usage (Undefined)
-    0xb1, 0x02,       //  Feature (Data,Var,Abs)
-    0x85, 0x0e,       //  Report ID (14)
-    0x09, 0x00,       //  Usage (Undefined)
-    0x96, 0x0a, 0x01, //  Report Count (266)
-    0xb1, 0x02,       //  Feature (Data,Var,Abs)
     0xc0,             // End Collection
     0x05, 0x0d,       // Usage Page (Digitizers)
-    0x09, 0x02,       // Usage (Pen)
+    0x09, 0x04,       // Usage (Touch Screen) // change to 05 for touchpad
     0xa1, 0x01,       // Collection (Application)
-    0x85, 0x1a,       //  Report ID (26)
-    0x09, 0x20,       //  Usage (Stylus)
-    0xa1, 0x00,       //  Collection (Physical)
-    0x09, 0x42,       //   Usage (Tip Switch)
-    0x09, 0x44,       //   Usage (Barrel Switch)
-    0x09, 0x45,       //   Usage (Eraser)
-    0x09, 0x3c,       //   Usage (Invert)
-    0x09, 0x5a,       //   Usage (Secondary Barrel Switch)
-    0x09, 0x32,       //   Usage (In Range)
-    0x15, 0x00,       //   Logical Minimum (0)
-    0x25, 0x01,       //   Logical Maximum (1)
-    0x75, 0x01,       //   Report Size (1)
-    0x95, 0x06,       //   Report Count (6)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x09, 0x38,       //   Usage (Transducer Index)
-    0x25, 0x03,       //   Logical Maximum (3)
-    0x75, 0x02,       //   Report Size (2)
-    0x95, 0x01,       //   Report Count (1)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x05, 0x01,       //   Usage Page (Generic Desktop)
-    0x09, 0x30,       //   Usage (X)
-    0x26, 0xe6, 0x51, //   Logical Maximum (20966)
-    0x46, 0xe6, 0x51, //   Physical Maximum (20966)
-    0x65, 0x11,       //   Unit (SILinear: cm)
-    0x55, 0x0d,       //   Unit Exponent (-3)
-    0x75, 0x10,       //   Report Size (16)
-    0x95, 0x01,       //   Report Count (1)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x09, 0x31,       //   Usage (Y)
-    0x26, 0x6d, 0x3d, //   Logical Maximum (15725)
-    0x46, 0x6d, 0x3d, //   Physical Maximum (15725)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
+    0x85, 0x03,       //   Report ID (3)
+    0x09, 0x22,       //   Usage (Finger)
+    0xa1, 0x02,       //   Collection (Logical)
+    0x09, 0x42,       //     Usage (Tip Switch)
+    0x15, 0x00,       //     Logical Minimum (0)
+    0x25, 0x01,       //     Logical Maximum (1)
+    0x75, 0x01,       //     Report Size (1)
+    0x95, 0x01,       //     Report Count (1)
+    0x81, 0x02,       //     Input (Data,Var,Abs)
+    0x75, 0x01,       //     Report Size (1)
+    0x95, 0x03,       //     Report Count (3)
+    0x81, 0x03,       //     Input (Cnst,Var,Abs)
+    0x25, 0x0f,       //     Logical Maximum (15)
+    0x75, 0x04,       //     Report Size (4)
+    0x95, 0x01,       //     Report Count (1)
+    0x09, 0x51,       //     Usage (Contact Id)
+    0x81, 0x02,       //     Input (Data,Var,Abs)
+    0x05, 0x01,       //     Usage Page (Generic Desktop)
+    0x15, 0x00,       //     Logical Minimum (0)
+    0x26, 0x46, 0x07, //     Logical Maximum (1862)
+    0x75, 0x10,       //     Report Size (16)
+    0x55, 0x0e,       //     Unit Exponent (-2)
+    0x65, 0x11,       //     Unit (SILinear: cm)
+    0x09, 0x30,       //     Usage (X)
+    0x35, 0x00,       //     Physical Minimum (0)
+    0x46, 0x46, 0x07, //     Physical Maximum (1862)
+    0x95, 0x01,       //     Report Count (1)
+    0x81, 0x02,       //     Input (Data,Var,Abs)
+    0x26, 0x76, 0x05, //     Logical Maximum (1398)
+    0x09, 0x31,       //     Usage (Y)
+    0x46, 0x76, 0x05, //     Physical Maximum (1398)
+    0x81, 0x02,       //     Input (Data,Var,Abs)
+    0xc0,             //   End Collection
     0x05, 0x0d,       //   Usage Page (Digitizers)
-    0x09, 0x30,       //   Usage (Tip Pressure)
-    0x26, 0xff, 0x0f, //   Logical Maximum (4095)
-    0x46, 0xb0, 0x0f, //   Physical Maximum (4016)
-    0x66, 0x11, 0xe1, //   Unit (SILinear: cm * g * s⁻²)
-    0x55, 0x02,       //   Unit Exponent (2)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x06, 0x00, 0xff, //   Usage Page (Vendor Defined Page 1)
-    0x09, 0x04,       //   Usage (Vendor Usage 0x04)
+    0x15, 0x00,       //   Logical Minimum (0)
+    0x25, 0x7f,       //   Logical Maximum (127)
     0x75, 0x08,       //   Report Size (8)
-    0x26, 0xff, 0x00, //   Logical Maximum (255)
-    0x46, 0xff, 0x00, //   Physical Maximum (255)
-    0x65, 0x11,       //   Unit (SILinear: cm)
-    0x55, 0x0e,       //   Unit Exponent (-2)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x05, 0x0d,       //   Usage Page (Digitizers)
-    0x09, 0x3d,       //   Usage (X Tilt)
-    0x75, 0x10,       //   Report Size (16)
-    0x16, 0xd8, 0xdc, //   Logical Minimum (-9000)
-    0x26, 0x28, 0x23, //   Logical Maximum (9000)
-    0x36, 0xd8, 0xdc, //   Physical Minimum (-9000)
-    0x46, 0x28, 0x23, //   Physical Maximum (9000)
-    0x65, 0x14,       //   Unit (EnglishRotation: deg)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x09, 0x3e,       //   Usage (Y Tilt)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x65, 0x00,       //   Unit (None)
-    0x55, 0x00,       //   Unit Exponent (0)
-    0x15, 0x00,       //   Logical Minimum (0)
-    0x35, 0x00,       //   Physical Minimum (0)
-    0x45, 0x00,       //   Physical Maximum (0)
-    0x05, 0x01,       //   Usage Page (Generic Desktop)
-    0x09, 0x32,       //   Usage (Z)
-    0x75, 0x10,       //   Report Size (16)
     0x95, 0x01,       //   Report Count (1)
-    0x16, 0x01, 0xff, //   Logical Minimum (-255)
-    0x25, 0x00,       //   Logical Maximum (0)
-    0x36, 0x01, 0xff, //   Physical Minimum (-255)
-    0x45, 0x00,       //   Physical Maximum (0)
-    0x65, 0x11,       //   Unit (SILinear: cm)
-    0x55, 0x0e,       //   Unit Exponent (-2)
+    0x09, 0x54,       //   Usage (Contact Count)
     0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x15, 0x00,       //   Logical Minimum (0)
-    0x35, 0x00,       //   Physical Minimum (0)
-    0x65, 0x00,       //   Unit (None)
-    0x55, 0x00,       //   Unit Exponent (0)
-    0xc0,             //  End Collection
-    0xc0,             // End Collection
-    0x06, 0x00, 0xff, // Usage Page (Vendor Defined Page 1)
-    0x09, 0x00,       // Usage (Undefined)
-    0xa1, 0x01,       // Collection (Application)
-    0x85, 0x1b,       //  Report ID (27)
-    0x05, 0x0d,       //  Usage Page (Digitizers)
-    0x09, 0x20,       //  Usage (Stylus)
-    0xa1, 0x00,       //  Collection (Physical)
-    0x09, 0x42,       //   Usage (Tip Switch)
-    0x09, 0x44,       //   Usage (Barrel Switch)
-    0x09, 0x45,       //   Usage (Eraser)
-    0x09, 0x3c,       //   Usage (Invert)
-    0x09, 0x00,       //   Usage (Undefined)
-    0x09, 0x32,       //   Usage (In Range)
-    0x15, 0x00,       //   Logical Minimum (0)
-    0x25, 0x01,       //   Logical Maximum (1)
-    0x75, 0x01,       //   Report Size (1)
-    0x95, 0x06,       //   Report Count (6)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x09, 0x38,       //   Usage (Transducer Index)
-    0x25, 0x03,       //   Logical Maximum (3)
-    0x75, 0x02,       //   Report Size (2)
-    0x95, 0x01,       //   Report Count (1)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x05, 0x01,       //   Usage Page (Generic Desktop)
-    0x09, 0x30,       //   Usage (X)
-    0x26, 0xe6, 0x51, //   Logical Maximum (20966)
-    0x46, 0xe6, 0x51, //   Physical Maximum (20966)
-    0x65, 0x11,       //   Unit (SILinear: cm)
-    0x55, 0x0d,       //   Unit Exponent (-3)
-    0x75, 0x10,       //   Report Size (16)
-    0x95, 0x01,       //   Report Count (1)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x09, 0x31,       //   Usage (Y)
-    0x26, 0x6d, 0x3d, //   Logical Maximum (15725)
-    0x46, 0x6d, 0x3d, //   Physical Maximum (15725)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x45, 0x00,       //   Physical Maximum (0)
-    0x65, 0x00,       //   Unit (None)
-    0x55, 0x00,       //   Unit Exponent (0)
-    0x05, 0x0d,       //   Usage Page (Digitizers)
-    0x09, 0x30,       //   Usage (Tip Pressure)
-    0x26, 0xff, 0x0f, //   Logical Maximum (4095)
-    0x46, 0xb0, 0x0f, //   Physical Maximum (4016)
-    0x66, 0x11, 0xe1, //   Unit (SILinear: cm * g * s⁻²)
-    0x55, 0x02,       //   Unit Exponent (2)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x06, 0x00, 0xff, //   Usage Page (Vendor Defined Page 1)
-    0x09, 0x04,       //   Usage (Vendor Usage 0x04)
-    0x75, 0x08,       //   Report Size (8)
-    0x26, 0xff, 0x00, //   Logical Maximum (255)
-    0x46, 0xff, 0x00, //   Physical Maximum (255)
-    0x65, 0x11,       //   Unit (SILinear: cm)
-    0x55, 0x0e,       //   Unit Exponent (-2)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x05, 0x0d,       //   Usage Page (Digitizers)
-    0x09, 0x3d,       //   Usage (X Tilt)
-    0x75, 0x10,       //   Report Size (16)
-    0x16, 0xd8, 0xdc, //   Logical Minimum (-9000)
-    0x26, 0x28, 0x23, //   Logical Maximum (9000)
-    0x36, 0xd8, 0xdc, //   Physical Minimum (-9000)
-    0x46, 0x28, 0x23, //   Physical Maximum (9000)
-    0x65, 0x14,       //   Unit (EnglishRotation: deg)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x09, 0x3e,       //   Usage (Y Tilt)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x65, 0x00,       //   Unit (None)
-    0x55, 0x00,       //   Unit Exponent (0)
-    0x15, 0x00,       //   Logical Minimum (0)
-    0x35, 0x00,       //   Physical Minimum (0)
-    0x45, 0x00,       //   Physical Maximum (0)
-    0x05, 0x01,       //   Usage Page (Generic Desktop)
-    0x09, 0x32,       //   Usage (Z)
-    0x75, 0x10,       //   Report Size (16)
-    0x95, 0x01,       //   Report Count (1)
-    0x16, 0x01, 0xff, //   Logical Minimum (-255)
-    0x25, 0x00,       //   Logical Maximum (0)
-    0x36, 0x01, 0xff, //   Physical Minimum (-255)
-    0x45, 0x00,       //   Physical Maximum (0)
-    0x65, 0x11,       //   Unit (SILinear: cm)
-    0x55, 0x0e,       //   Unit Exponent (-2)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
-    0x15, 0x00,       //   Logical Minimum (0)
-    0x35, 0x00,       //   Physical Minimum (0)
-    0x65, 0x00,       //   Unit (None)
-    0x55, 0x00,       //   Unit Exponent (0)
-    0xc0,             //  End Collection
-    0xc0,             // End Collection
+    0x55, 0x0c,       //   Unit Exponent (-4)
+    0x66, 0x01, 0x10, //   Unit (SI Linear: s)
+    0x27, 0xff, 0xff, 0x00, 0x00, //   Logical Maximum (65535)
+    0x47, 0xff, 0xff, 0x00, 0x00, //   Physical Maximum (65535)
+    0x75, 0x10,                   //   Report Size (16)
+    0x95, 0x01,                   //   Report Count (1)
+    0x09, 0x56,                   //   Usage (Scan Time)
+    0x81, 0x02,                   //   Input (Data,Var,Abs)
+    0xc0                          // End Collection
 };
+
+#define MAX_SLOTS 10
+
+typedef struct {
+  uint16_t x[MAX_SLOTS];
+  uint16_t y[MAX_SLOTS];
+  int32_t tid[MAX_SLOTS];
+  bool lifted[MAX_SLOTS];
+  uint8_t current;
+} slots;
 
 typedef struct {
   usbg_state *s;
@@ -570,8 +347,9 @@ int find_evdev_device(char *name, struct libevdev **out_dev) {
   return -1;
 }
 
-int handle_ws8100_pen_events(struct input_event ev, unsigned char *buttons,
-                             int out_fd) {
+int handle_ws8100_pen_events(struct input_event ev, void *data,
+                             pthread_mutex_t *out_mutex, int out_fd) {
+  unsigned char *buttons = data;
   if (ev.type == EV_KEY) {
     int bit = -1;
     bool invert = false; // used for when double press event is passed between
@@ -613,62 +391,106 @@ int handle_ws8100_pen_events(struct input_event ev, unsigned char *buttons,
       } else {
         buttons[1] &= ~(1 << bit);
       }
+      pthread_mutex_lock(out_mutex);
       if (write(out_fd, buttons, 2) != 2) {
         perror("Write failed");
+        pthread_mutex_unlock(out_mutex);
         return -1;
       }
+      pthread_mutex_unlock(out_mutex);
     }
   }
   return 0;
 }
 
-bool volatile keepRunning = true;
+int handle_cyttsp_events(struct input_event ev, void *data,
+                         pthread_mutex_t *out_mutex, int out_fd) {
+  slots *touches = data;
+  if (ev.type == EV_ABS) {
+    switch (ev.code) {
+    case ABS_MT_SLOT:
+      touches->current = ev.value;
+      break;
+    case ABS_MT_TRACKING_ID:
+      touches->tid[touches->current] = ev.value;
+      break;
+    case ABS_MT_POSITION_X:
+      touches->x[touches->current] = ev.value;
+      break;
+    case ABS_MT_POSITION_Y:
+      touches->y[touches->current] = ev.value;
+      break;
+    }
+  } else if (ev.type == EV_SYN && ev.code == SYN_REPORT) {
+    bool active[MAX_SLOTS] = {0};
+    bool lifting[MAX_SLOTS] = {0};
+    uint8_t n_touches = 0;
 
-void intHandler(int dummy) { keepRunning = false; }
+    for (int i = 0; i < MAX_SLOTS; i++) {
+      if (touches->tid[i] != -1) {
+        active[i] = true;
+        n_touches++;
+      } else if (touches->lifted[i] == false) {
+        lifting[i] = true;
+        n_touches++;
+      }
+    }
 
-int main() {
-  signal(SIGINT, intHandler);
+    for (int i = 0; i < MAX_SLOTS; i++) {
+      if (!(active[i] || lifting[i]))
+        continue;
 
-  int w9013, out_fd, evdev_rc, ws8100_pen_fd;
-  unsigned char w9013_buffer[15];
-  ssize_t bytes = 0;
-  unsigned char buttons[2] = {1, 0};
-  usbg_context usb_ctx = {0};
+      uint8_t report[9] = {0x03, (active[i] ? 0x01 : 0x00) | ((i & 0x0F) << 4)};
+      memcpy(&report[2], &touches->x[i], 2);
+      memcpy(&report[4], &touches->y[i], 2);
+      report[6] = n_touches;
+      uint16_t time = ev.time.tv_usec / 100 + ev.time.tv_sec * 10000;
+      memcpy(&report[7], &time, 2);
 
-  struct libevdev *ws8100_pen = NULL;
-  if (initUSB(&usb_ctx) < 0) {
-    fprintf(stderr, "Failed to init usb gadget");
-    goto out4;
+      pthread_mutex_lock(out_mutex);
+      if (write(out_fd, report, 9) != 9) {
+        perror("Write failed");
+        pthread_mutex_unlock(out_mutex);
+        return -1;
+      }
+      pthread_mutex_unlock(out_mutex);
+    }
+
+    for (int i = 0; i < MAX_SLOTS; i++) {
+      touches->lifted[i] = touches->tid[i] == -1;
+    }
   }
+  return 0;
+}
 
-  w9013 = find_hidraw_device("w9013 digitizer", W9013_VENDOR, W9013_PRODUCT);
-  if (w9013 < 0) {
-    fprintf(stderr, "Failed to find w9013 digitizer");
-    goto out4;
-  }
+volatile sig_atomic_t keepRunning = true;
+static int wakeup_pipe_write;
 
-  out_fd = open("/dev/hidg0", O_WRONLY);
-  if (out_fd < 0) {
-    perror("Failed to open /dev/hidg0");
-    goto out3;
-  }
+void intHandler(int dummy) {
+  keepRunning = false;
+  write(wakeup_pipe_write, "\0", 1);
+}
 
-  evdev_rc = find_evdev_device(WS8100_PEN_NAME, &ws8100_pen);
-  if (evdev_rc < 0) {
-    fprintf(stderr, "Failed to find ws8100_pen");
-    goto out2;
-  }
+typedef int (*evdev_handler_fn)(struct input_event, void *data,
+                                pthread_mutex_t *mutex, int out_fd);
 
-  ws8100_pen_fd = libevdev_get_fd(ws8100_pen);
-  evdev_rc = libevdev_grab(ws8100_pen, LIBEVDEV_GRAB);
-  if (evdev_rc < 0) {
-    fprintf(stderr, "Failed to grab ws8100_pen");
-    goto out1;
-  }
+typedef struct {
+  struct libevdev *dev;
+  int fd;
+  void *data;
+  pthread_mutex_t *out_mutex;
+  int out_fd;
+  int wakeup_r;
+  int wakeup_w;
+  evdev_handler_fn handler;
+} evdev_worker_args;
 
-  struct pollfd fds[2] = {
-      {.fd = ws8100_pen_fd, .events = POLLIN},
-      {.fd = w9013, .events = POLLIN},
+void *evdev_worker(void *arg) {
+  evdev_worker_args *a = arg;
+  int evdev_rc;
+  struct pollfd fds[] = {
+      {.fd = a->fd, .events = POLLIN},
+      {.fd = a->wakeup_r, .events = POLLIN},
   };
 
   while (keepRunning) {
@@ -682,46 +504,178 @@ int main() {
     if (fds[0].revents & POLLIN) {
       struct input_event ev;
       do {
-        evdev_rc =
-            libevdev_next_event(ws8100_pen, LIBEVDEV_READ_FLAG_NORMAL, &ev);
+        evdev_rc = libevdev_next_event(a->dev, LIBEVDEV_READ_FLAG_NORMAL, &ev);
         if (evdev_rc == LIBEVDEV_READ_STATUS_SYNC) {
-          printf("::::::::::::::::::::: dropped ::::::::::::::::::::::\n");
+          printf("dropped\n");
           while (evdev_rc == LIBEVDEV_READ_STATUS_SYNC) {
             evdev_rc =
-                libevdev_next_event(ws8100_pen, LIBEVDEV_READ_FLAG_SYNC, &ev);
-            handle_ws8100_pen_events(ev, buttons, out_fd);
+                libevdev_next_event(a->dev, LIBEVDEV_READ_FLAG_SYNC, &ev);
+            if (a->handler(ev, a->data, a->out_mutex, a->out_fd) < 0)
+              goto exit;
           }
-          printf("::::::::::::::::::::: re-synced ::::::::::::::::::::::\n");
+          printf("re-synced\n");
         } else if (evdev_rc == LIBEVDEV_READ_STATUS_SUCCESS) {
-          handle_ws8100_pen_events(ev, buttons, out_fd);
+          if (a->handler(ev, a->data, a->out_mutex, a->out_fd) < 0)
+            goto exit;
         } else {
           fprintf(stderr, "Failed to handle events: %s\n", strerror(-evdev_rc));
-          goto out1;
+          goto exit;
         }
-      } while (libevdev_has_event_pending(ws8100_pen));
+      } while (libevdev_has_event_pending(a->dev));
     }
-    if (fds[1].revents & POLLIN) {
+  }
+exit:
+  keepRunning = false;
+  write(a->wakeup_w, "\0", 1);
+  return NULL;
+}
+
+int main() {
+  int wakeup_pipe[2];
+  pipe(wakeup_pipe);
+  wakeup_pipe_write = wakeup_pipe[1];
+  signal(SIGINT, intHandler);
+
+  int w9013, out_fd, evdev_rc, ws8100_pen_fd, cyttsp5_fd;
+  unsigned char w9013_buffer[15];
+  ssize_t bytes = 0;
+  unsigned char buttons[2] = {1, 0};
+  slots *cyttsp5_touches;
+  usbg_context usb_ctx = {0};
+  struct libevdev *ws8100_pen, *cyttsp5, *w9013_evdev = NULL;
+  pthread_mutex_t out_mutex = PTHREAD_MUTEX_INITIALIZER;
+  pthread_t cyttsp5_thread;
+  pthread_t ws8100_pen_thread;
+
+  if (!(cyttsp5_touches = calloc(1, sizeof(slots))))
+    return -1;
+  for (int i = 0; i < MAX_SLOTS; i++) {
+    cyttsp5_touches->tid[i] = -1;
+  }
+
+  if (initUSB(&usb_ctx) < 0) {
+    fprintf(stderr, "Failed to init usb gadget");
+    goto cleanup_usb;
+  }
+
+  out_fd = open("/dev/hidg0", O_WRONLY);
+  if (out_fd < 0) {
+    perror("Failed to open /dev/hidg0");
+    goto cleanup_usb;
+  }
+
+  w9013 = find_hidraw_device("w9013 digitizer", W9013_VENDOR, W9013_PRODUCT);
+  if (w9013 < 0) {
+    fprintf(stderr, "Failed to find w9013 digitizer");
+    goto cleanup_out_fd;
+  }
+
+  evdev_rc = find_evdev_device(W9013_NAME, &w9013_evdev);
+  if (evdev_rc < 0) {
+    fprintf(stderr, "Failed to find w9013");
+    goto cleanup_w9013;
+  }
+  evdev_rc = libevdev_grab(w9013_evdev, LIBEVDEV_GRAB);
+  if (evdev_rc < 0) {
+    fprintf(stderr, "Failed to grab w9013");
+    goto cleanup_w9013_evdev;
+  }
+
+  evdev_rc = find_evdev_device(WS8100_PEN_NAME, &ws8100_pen);
+  if (evdev_rc < 0) {
+    fprintf(stderr, "Failed to find ws8100_pen");
+    goto cleanup_w9013_evdev;
+  }
+  ws8100_pen_fd = libevdev_get_fd(ws8100_pen);
+  evdev_rc = libevdev_grab(ws8100_pen, LIBEVDEV_GRAB);
+  if (evdev_rc < 0) {
+    fprintf(stderr, "Failed to grab ws8100_pen");
+    goto cleanup_ws8100;
+  }
+
+  evdev_rc = find_evdev_device(CYTTSP5_NAME, &cyttsp5);
+  if (evdev_rc < 0) {
+    fprintf(stderr, "Failed to find cyttsp5");
+    goto cleanup_ws8100;
+  }
+  cyttsp5_fd = libevdev_get_fd(cyttsp5);
+  evdev_rc = libevdev_grab(cyttsp5, LIBEVDEV_GRAB);
+  if (evdev_rc < 0) {
+    fprintf(stderr, "Failed to grab cyttsp5");
+    goto cleanup_all;
+  }
+
+  evdev_worker_args cyttsp5_args = {.dev = cyttsp5,
+                                    .fd = cyttsp5_fd,
+                                    .data = cyttsp5_touches,
+                                    .out_mutex = &out_mutex,
+                                    .out_fd = out_fd,
+                                    .wakeup_r = wakeup_pipe[0],
+                                    .wakeup_w = wakeup_pipe[1],
+                                    .handler = handle_cyttsp_events};
+  pthread_create(&cyttsp5_thread, NULL, evdev_worker, &cyttsp5_args);
+
+  evdev_worker_args ws8100_pen_args = {.dev = ws8100_pen,
+                                       .fd = ws8100_pen_fd,
+                                       .data = buttons,
+                                       .out_mutex = &out_mutex,
+                                       .out_fd = out_fd,
+                                       .wakeup_r = wakeup_pipe[0],
+                                       .wakeup_w = wakeup_pipe[1],
+                                       .handler = handle_ws8100_pen_events};
+  pthread_create(&ws8100_pen_thread, NULL, evdev_worker, &ws8100_pen_args);
+
+  struct pollfd fds[] = {
+      {.fd = w9013, .events = POLLIN},
+      {.fd = wakeup_pipe[0], .events = POLLIN},
+  };
+
+  while (keepRunning) {
+    int r = poll(fds, 2, -1);
+    if (r < 0) {
+      if (errno == EINTR)
+        continue;
+      perror("Failed to poll for events");
+      break;
+    }
+    if (fds[0].revents & POLLIN) {
       while ((bytes = read(w9013, w9013_buffer, sizeof(w9013_buffer))) > 0) {
+        pthread_mutex_lock(&out_mutex);
         if (write(out_fd, w9013_buffer, bytes) != bytes) {
           perror("Write failed");
-          goto out1;
+          pthread_mutex_unlock(&out_mutex);
+          goto exit;
         }
+        pthread_mutex_unlock(&out_mutex);
       }
       if (bytes < 0 && errno != EAGAIN) {
         perror("Read failed");
-        goto out1;
+        goto exit;
       }
     }
   }
-out1:
+exit:
+  keepRunning = 0;
+  write(wakeup_pipe[1], "\0", 1);
+  pthread_join(cyttsp5_thread, NULL);
+  pthread_join(ws8100_pen_thread, NULL);
+cleanup_all:
+  libevdev_grab(cyttsp5, LIBEVDEV_UNGRAB);
+  libevdev_free(cyttsp5);
+  close(cyttsp5_fd);
+cleanup_ws8100:
   libevdev_grab(ws8100_pen, LIBEVDEV_UNGRAB);
   libevdev_free(ws8100_pen);
   close(ws8100_pen_fd);
-out2:
-  close(out_fd);
-out3:
+cleanup_w9013_evdev:
+  libevdev_grab(w9013_evdev, LIBEVDEV_UNGRAB);
+  libevdev_free(w9013_evdev);
+cleanup_w9013:
   close(w9013);
-out4:
+cleanup_out_fd:
+  close(out_fd);
+cleanup_usb:
   cleanupUSB(&usb_ctx);
-  return evdev_rc;
+  free(cyttsp5_touches);
+  return 0;
 }
