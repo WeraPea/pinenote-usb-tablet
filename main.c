@@ -26,7 +26,7 @@
 #define CYTTSP5_NAME "cyttsp5"
 #define W9013_NAME "w9013 2D1F:0095 Stylus"
 
-static char report_desc[] = {
+static char report_desc_w9013[] = {
     // hid-decode /dev/hidraw0
     // w9013 2D1F:0095
     0x05, 0x0d,       // Usage Page (Digitizers)
@@ -128,10 +128,13 @@ static char report_desc[] = {
     0x26, 0xff, 0x00, //  Logical Maximum (255)
     0xb1, 0x12,       //  Feature (Data,Var,Abs,NonLin)
     0xc0,             // End Collection
+};
+
+static char report_desc_touch[] = {
     0x05, 0x0d,       // Usage Page (Digitizers)
     0x09, 0x04,       // Usage (Touch Screen) // change to 05 for touchpad
     0xa1, 0x01,       // Collection (Application)
-    0x85, 0x03,       //   Report ID (3)
+    0x85, 0x01,       //   Report ID (1)
     0x09, 0x22,       //   Usage (Finger)
     0xa1, 0x02,       //   Collection (Logical)
     0x09, 0x42,       //     Usage (Tip Switch)
@@ -196,7 +199,8 @@ typedef struct {
   usbg_state *s;
   usbg_gadget *g;
   usbg_config *c;
-  usbg_function *f_hid;
+  usbg_function *f_hid_w9013;
+  usbg_function *f_hid_touch;
 } usbg_context;
 
 int initUSB(usbg_context *usb_ctx) {
@@ -217,16 +221,26 @@ int initUSB(usbg_context *usb_ctx) {
       .manufacturer = "Pine64",     /* Manufacturer */
       .product = "PineNote"         /* Product string */
   };
-  struct usbg_config_strs c_strs = {.configuration = "1xHID"};
-  struct usbg_f_hid_attrs f_attrs = {
-      .protocol = 2,
+  struct usbg_config_strs c_strs = {.configuration = "2xHID"};
+  struct usbg_f_hid_attrs f_attrs_ws9013 = {
+      .protocol = 0,
       .report_desc =
           {
-              .desc = report_desc,
-              .len = sizeof(report_desc),
+              .desc = report_desc_w9013,
+              .len = sizeof(report_desc_w9013),
           },
       .report_length = 15,
-      .subclass = 1,
+      .subclass = 0,
+  };
+  struct usbg_f_hid_attrs f_attrs_touch = {
+      .protocol = 0,
+      .report_desc =
+          {
+              .desc = report_desc_touch,
+              .len = sizeof(report_desc_touch),
+          },
+      .report_length = 9,
+      .subclass = 0,
   };
 
   usbg_ret = usbg_init("/sys/kernel/config", &usb_ctx->s);
@@ -244,8 +258,16 @@ int initUSB(usbg_context *usb_ctx) {
             usbg_strerror(usbg_ret));
     goto out2;
   }
-  usbg_ret = usbg_create_function(usb_ctx->g, USBG_F_HID, "usb0", &f_attrs,
-                                  &usb_ctx->f_hid);
+  usbg_ret = usbg_create_function(usb_ctx->g, USBG_F_HID, "usb0",
+                                  &f_attrs_ws9013, &usb_ctx->f_hid_w9013);
+  if (usbg_ret != USBG_SUCCESS) {
+    fprintf(stderr, "Error creating function\n");
+    fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
+            usbg_strerror(usbg_ret));
+    goto out2;
+  }
+  usbg_ret = usbg_create_function(usb_ctx->g, USBG_F_HID, "usb1",
+                                  &f_attrs_touch, &usb_ctx->f_hid_touch);
   if (usbg_ret != USBG_SUCCESS) {
     fprintf(stderr, "Error creating function\n");
     fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
@@ -260,7 +282,16 @@ int initUSB(usbg_context *usb_ctx) {
             usbg_strerror(usbg_ret));
     goto out2;
   }
-  usbg_ret = usbg_add_config_function(usb_ctx->c, "some_name", usb_ctx->f_hid);
+  usbg_ret =
+      usbg_add_config_function(usb_ctx->c, "w9013", usb_ctx->f_hid_w9013);
+  if (usbg_ret != USBG_SUCCESS) {
+    fprintf(stderr, "Error adding function\n");
+    fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
+            usbg_strerror(usbg_ret));
+    goto out2;
+  }
+  usbg_ret =
+      usbg_add_config_function(usb_ctx->c, "touch", usb_ctx->f_hid_touch);
   if (usbg_ret != USBG_SUCCESS) {
     fprintf(stderr, "Error adding function\n");
     fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
@@ -440,20 +471,17 @@ int handle_cyttsp_events(struct input_event ev, void *data,
       if (!(active[i] || lifting[i]))
         continue;
 
-      uint8_t report[9] = {0x03, (active[i] ? 0x01 : 0x00) | ((i & 0x0F) << 4)};
+      uint8_t report[9] = {0x01, (active[i] ? 0x01 : 0x00) | ((i & 0x0F) << 4)};
       memcpy(&report[2], &touches->x[i], 2);
       memcpy(&report[4], &touches->y[i], 2);
       report[6] = n_touches;
       uint16_t time = ev.time.tv_usec / 100 + ev.time.tv_sec * 10000;
       memcpy(&report[7], &time, 2);
 
-      pthread_mutex_lock(out_mutex);
       if (write(out_fd, report, 9) != 9) {
         perror("Write failed");
-        pthread_mutex_unlock(out_mutex);
         return -1;
       }
-      pthread_mutex_unlock(out_mutex);
     }
 
     for (int i = 0; i < MAX_SLOTS; i++) {
@@ -536,7 +564,7 @@ int main() {
   wakeup_pipe_write = wakeup_pipe[1];
   signal(SIGINT, intHandler);
 
-  int w9013, out_fd, evdev_rc, ws8100_pen_fd, cyttsp5_fd;
+  int w9013, out_fd, out_fd2, evdev_rc, ws8100_pen_fd, cyttsp5_fd;
   unsigned char w9013_buffer[15];
   ssize_t bytes = 0;
   unsigned char buttons[2] = {1, 0};
@@ -561,6 +589,12 @@ int main() {
   out_fd = open("/dev/hidg0", O_WRONLY);
   if (out_fd < 0) {
     perror("Failed to open /dev/hidg0");
+    goto cleanup_usb;
+  }
+
+  out_fd2 = open("/dev/hidg1", O_WRONLY);
+  if (out_fd < 0) {
+    perror("Failed to open /dev/hidg1");
     goto cleanup_usb;
   }
 
@@ -609,7 +643,7 @@ int main() {
                                     .fd = cyttsp5_fd,
                                     .data = cyttsp5_touches,
                                     .out_mutex = &out_mutex,
-                                    .out_fd = out_fd,
+                                    .out_fd = out_fd2,
                                     .wakeup_r = wakeup_pipe[0],
                                     .wakeup_w = wakeup_pipe[1],
                                     .handler = handle_cyttsp_events};
