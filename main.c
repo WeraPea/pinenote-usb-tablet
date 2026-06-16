@@ -634,6 +634,7 @@ int main(int argc, char *argv[]) {
   pthread_mutex_t out_mutex = PTHREAD_MUTEX_INITIALIZER;
   pthread_t cyttsp5_thread;
   pthread_t ws8100_pen_thread;
+  evdev_worker_args cyttsp5_args, ws8100_pen_args;
 
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--use-touchscreen") == 0) {
@@ -665,7 +666,7 @@ int main(int argc, char *argv[]) {
 
   if (use_cyttsp5) {
     out_fd2 = open("/dev/hidg1", O_WRONLY);
-    if (out_fd < 0) {
+    if (out_fd2 < 0) {
       perror("Failed to open /dev/hidg1");
       goto cleanup_usb;
     }
@@ -725,25 +726,25 @@ int main(int argc, char *argv[]) {
   signal(SIGINT, intHandler);
 
   if (use_cyttsp5) {
-    evdev_worker_args cyttsp5_args = {.dev = cyttsp5,
-                                      .fd = cyttsp5_fd,
-                                      .data = cyttsp5_touches,
-                                      .out_mutex = &out_mutex,
-                                      .out_fd = out_fd2,
-                                      .wakeup_r = wakeup_pipe[0],
-                                      .wakeup_w = wakeup_pipe[1],
-                                      .handler = handle_cyttsp_events};
+    cyttsp5_args = (evdev_worker_args){.dev = cyttsp5,
+                                       .fd = cyttsp5_fd,
+                                       .data = cyttsp5_touches,
+                                       .out_mutex = &out_mutex,
+                                       .out_fd = out_fd2,
+                                       .wakeup_r = wakeup_pipe[0],
+                                       .wakeup_w = wakeup_pipe[1],
+                                       .handler = handle_cyttsp_events};
     pthread_create(&cyttsp5_thread, NULL, evdev_worker, &cyttsp5_args);
   }
 
-  evdev_worker_args ws8100_pen_args = {.dev = ws8100_pen,
-                                       .fd = ws8100_pen_fd,
-                                       .data = buttons,
-                                       .out_mutex = &out_mutex,
-                                       .out_fd = out_fd,
-                                       .wakeup_r = wakeup_pipe[0],
-                                       .wakeup_w = wakeup_pipe[1],
-                                       .handler = handle_ws8100_pen_events};
+  ws8100_pen_args = (evdev_worker_args){.dev = ws8100_pen,
+                                        .fd = ws8100_pen_fd,
+                                        .data = buttons,
+                                        .out_mutex = &out_mutex,
+                                        .out_fd = out_fd,
+                                        .wakeup_r = wakeup_pipe[0],
+                                        .wakeup_w = wakeup_pipe[1],
+                                        .handler = handle_ws8100_pen_events};
   pthread_create(&ws8100_pen_thread, NULL, evdev_worker, &ws8100_pen_args);
 
   struct pollfd fds[] = {
