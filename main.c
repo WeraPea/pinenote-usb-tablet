@@ -203,9 +203,42 @@ typedef struct {
   usbg_function *f_hid_touch;
 } usbg_context;
 
+int remove_gadget(usbg_gadget *g) {
+  int usbg_ret;
+  usbg_udc *u;
+
+  /* Check if gadget is enabled */
+  u = usbg_get_gadget_udc(g);
+
+  /* If gadget is enable we have to disable it first */
+  if (u) {
+    usbg_ret = usbg_disable_gadget(g);
+    if (usbg_ret != USBG_SUCCESS) {
+      fprintf(stderr, "Error on USB disable gadget udc\n");
+      fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
+              usbg_strerror(usbg_ret));
+      goto out;
+    }
+  }
+
+  /* Remove gadget with USBG_RM_RECURSE flag to remove
+   * also its configurations, functions and strings */
+  usbg_ret = usbg_rm_gadget(g, USBG_RM_RECURSE);
+  if (usbg_ret != USBG_SUCCESS) {
+    fprintf(stderr, "Error on USB gadget remove\n");
+    fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
+            usbg_strerror(usbg_ret));
+  }
+
+out:
+  return usbg_ret;
+}
+
 int initUSB(usbg_context *usb_ctx) {
   int usbg_ret = -EINVAL;
 
+  usbg_gadget *g_iter;
+  struct usbg_gadget_attrs g_iter_attrs;
   struct usbg_gadget_attrs g_attrs = {
       .bcdUSB = 0x0200,
       .bDeviceClass = USB_CLASS_PER_INTERFACE,
@@ -250,8 +283,34 @@ int initUSB(usbg_context *usb_ctx) {
             usbg_strerror(usbg_ret));
     goto out1;
   }
-  usbg_ret =
-      usbg_create_gadget(usb_ctx->s, "g1", &g_attrs, &g_strs, &usb_ctx->g);
+
+  g_iter = usbg_get_first_gadget(usb_ctx->s);
+  while (g_iter != NULL) {
+    usbg_ret = usbg_get_gadget_attrs(g_iter, &g_iter_attrs);
+    if (usbg_ret != USBG_SUCCESS) {
+      fprintf(stderr, "Error on USB get gadget attrs\n");
+      fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
+              usbg_strerror(usbg_ret));
+      goto out2;
+    }
+
+    if (g_iter_attrs.idVendor == g_attrs.idVendor &&
+        g_iter_attrs.idProduct == g_attrs.idProduct) {
+      usbg_gadget *g_next = usbg_get_next_gadget(g_iter);
+
+      fprintf(stderr, "Removing leftover gadget\n");
+      usbg_ret = remove_gadget(g_iter);
+      if (usbg_ret != USBG_SUCCESS)
+        goto out2;
+
+      g_iter = g_next;
+    } else {
+      g_iter = usbg_get_next_gadget(g_iter);
+    }
+  }
+
+  usbg_ret = usbg_create_gadget(usb_ctx->s, "pinenote-usb-tablet", &g_attrs,
+                                &g_strs, &usb_ctx->g);
   if (usbg_ret != USBG_SUCCESS) {
     fprintf(stderr, "Error creating gadget\n");
     fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
