@@ -652,14 +652,6 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  if (use_cyttsp5) {
-    if (!(cyttsp5_touches = calloc(1, sizeof(slots))))
-      return -1;
-    for (int i = 0; i < MAX_SLOTS; i++) {
-      cyttsp5_touches->tid[i] = -1;
-    }
-  }
-
   if (initUSB(&usb_ctx, use_cyttsp5) < 0) {
     fprintf(stderr, "Failed to init usb gadget");
     goto cleanup_usb;
@@ -709,9 +701,15 @@ int main(int argc, char *argv[]) {
   }
 
   if (grab_cyttsp5) {
+    if (!(cyttsp5_touches = calloc(1, sizeof(slots))))
+      goto cleanup_ws8100;
+    for (int i = 0; i < MAX_SLOTS; i++) {
+      cyttsp5_touches->tid[i] = -1;
+    }
     evdev_rc = find_evdev_device(CYTTSP5_NAME, &cyttsp5);
     if (evdev_rc < 0) {
       fprintf(stderr, "Failed to find cyttsp5");
+      free(cyttsp5_touches);
       goto cleanup_ws8100;
     }
     cyttsp5_fd = libevdev_get_fd(cyttsp5);
@@ -789,6 +787,7 @@ cleanup_all:
     libevdev_grab(cyttsp5, LIBEVDEV_UNGRAB);
     libevdev_free(cyttsp5);
     close(cyttsp5_fd);
+    free(cyttsp5_touches);
   }
 cleanup_ws8100:
   libevdev_grab(ws8100_pen, LIBEVDEV_UNGRAB);
@@ -803,6 +802,5 @@ cleanup_out_fd:
   close(out_fd);
 cleanup_usb:
   cleanupUSB(&usb_ctx);
-  free(cyttsp5_touches);
   return 0;
 }
