@@ -234,7 +234,7 @@ out:
   return usbg_ret;
 }
 
-int initUSB(usbg_context *usb_ctx) {
+int initUSB(usbg_context *usb_ctx, bool use_cyttsp5) {
   int usbg_ret = -EINVAL;
 
   usbg_gadget *g_iter;
@@ -325,13 +325,15 @@ int initUSB(usbg_context *usb_ctx) {
             usbg_strerror(usbg_ret));
     goto out2;
   }
-  usbg_ret = usbg_create_function(usb_ctx->g, USBG_F_HID, "usb1",
-                                  &f_attrs_touch, &usb_ctx->f_hid_touch);
-  if (usbg_ret != USBG_SUCCESS) {
-    fprintf(stderr, "Error creating function\n");
-    fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
-            usbg_strerror(usbg_ret));
-    goto out2;
+  if (use_cyttsp5) {
+    usbg_ret = usbg_create_function(usb_ctx->g, USBG_F_HID, "usb1",
+                                    &f_attrs_touch, &usb_ctx->f_hid_touch);
+    if (usbg_ret != USBG_SUCCESS) {
+      fprintf(stderr, "Error creating function\n");
+      fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
+              usbg_strerror(usbg_ret));
+      goto out2;
+    }
   }
   usbg_ret = usbg_create_config(usb_ctx->g, 1, "The only one", NULL, &c_strs,
                                 &usb_ctx->c);
@@ -349,13 +351,15 @@ int initUSB(usbg_context *usb_ctx) {
             usbg_strerror(usbg_ret));
     goto out2;
   }
-  usbg_ret =
-      usbg_add_config_function(usb_ctx->c, "touch", usb_ctx->f_hid_touch);
-  if (usbg_ret != USBG_SUCCESS) {
-    fprintf(stderr, "Error adding function\n");
-    fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
-            usbg_strerror(usbg_ret));
-    goto out2;
+  if (use_cyttsp5) {
+    usbg_ret =
+        usbg_add_config_function(usb_ctx->c, "touch", usb_ctx->f_hid_touch);
+    if (usbg_ret != USBG_SUCCESS) {
+      fprintf(stderr, "Error adding function\n");
+      fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
+              usbg_strerror(usbg_ret));
+      goto out2;
+    }
   }
   usbg_ret = usbg_enable_gadget(usb_ctx->g, DEFAULT_UDC);
   if (usbg_ret != USBG_SUCCESS) {
@@ -617,12 +621,9 @@ exit:
   return NULL;
 }
 
-int main() {
+int main(int argc, char *argv[]) {
   int wakeup_pipe[2];
-  pipe(wakeup_pipe);
-  wakeup_pipe_write = wakeup_pipe[1];
-  signal(SIGINT, intHandler);
-
+  bool use_cyttsp5 = false, grab_cyttsp5 = false;
   int w9013, out_fd, out_fd2, evdev_rc, ws8100_pen_fd, cyttsp5_fd;
   unsigned char w9013_buffer[15];
   ssize_t bytes = 0;
@@ -634,13 +635,32 @@ int main() {
   pthread_t cyttsp5_thread;
   pthread_t ws8100_pen_thread;
 
-  if (!(cyttsp5_touches = calloc(1, sizeof(slots))))
-    return -1;
-  for (int i = 0; i < MAX_SLOTS; i++) {
-    cyttsp5_touches->tid[i] = -1;
+  for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--use-touchscreen") == 0) {
+      use_cyttsp5 = true;
+      grab_cyttsp5 = true;
+    } else if (strcmp(argv[i], "--grab-touchscreen") == 0) {
+      grab_cyttsp5 = true;
+    } else {
+      printf("grabs and forwards PineNote's stylus and (optionally) "
+             "touchscreen input.\n");
+      printf("Usage: %s [options]\n\n", argv[0]);
+      printf("Options:\n"
+             "  --use-touchscreen   grab and forward touchscreen input\n"
+             "  --grab-touchscreen  grab touchscreen input\n");
+      return -1;
+    }
   }
 
-  if (initUSB(&usb_ctx) < 0) {
+  if (use_cyttsp5) {
+    if (!(cyttsp5_touches = calloc(1, sizeof(slots))))
+      return -1;
+    for (int i = 0; i < MAX_SLOTS; i++) {
+      cyttsp5_touches->tid[i] = -1;
+    }
+  }
+
+  if (initUSB(&usb_ctx, use_cyttsp5) < 0) {
     fprintf(stderr, "Failed to init usb gadget");
     goto cleanup_usb;
   }
@@ -651,10 +671,12 @@ int main() {
     goto cleanup_usb;
   }
 
-  out_fd2 = open("/dev/hidg1", O_WRONLY);
-  if (out_fd < 0) {
-    perror("Failed to open /dev/hidg1");
-    goto cleanup_usb;
+  if (use_cyttsp5) {
+    out_fd2 = open("/dev/hidg1", O_WRONLY);
+    if (out_fd < 0) {
+      perror("Failed to open /dev/hidg1");
+      goto cleanup_usb;
+    }
   }
 
   w9013 = find_hidraw_device("w9013 digitizer", W9013_VENDOR, W9013_PRODUCT);
@@ -686,27 +708,35 @@ int main() {
     goto cleanup_ws8100;
   }
 
-  evdev_rc = find_evdev_device(CYTTSP5_NAME, &cyttsp5);
-  if (evdev_rc < 0) {
-    fprintf(stderr, "Failed to find cyttsp5");
-    goto cleanup_ws8100;
-  }
-  cyttsp5_fd = libevdev_get_fd(cyttsp5);
-  evdev_rc = libevdev_grab(cyttsp5, LIBEVDEV_GRAB);
-  if (evdev_rc < 0) {
-    fprintf(stderr, "Failed to grab cyttsp5");
-    goto cleanup_all;
+  if (grab_cyttsp5) {
+    evdev_rc = find_evdev_device(CYTTSP5_NAME, &cyttsp5);
+    if (evdev_rc < 0) {
+      fprintf(stderr, "Failed to find cyttsp5");
+      goto cleanup_ws8100;
+    }
+    cyttsp5_fd = libevdev_get_fd(cyttsp5);
+    evdev_rc = libevdev_grab(cyttsp5, LIBEVDEV_GRAB);
+    if (evdev_rc < 0) {
+      fprintf(stderr, "Failed to grab cyttsp5");
+      goto cleanup_all;
+    }
   }
 
-  evdev_worker_args cyttsp5_args = {.dev = cyttsp5,
-                                    .fd = cyttsp5_fd,
-                                    .data = cyttsp5_touches,
-                                    .out_mutex = &out_mutex,
-                                    .out_fd = out_fd2,
-                                    .wakeup_r = wakeup_pipe[0],
-                                    .wakeup_w = wakeup_pipe[1],
-                                    .handler = handle_cyttsp_events};
-  pthread_create(&cyttsp5_thread, NULL, evdev_worker, &cyttsp5_args);
+  pipe(wakeup_pipe);
+  wakeup_pipe_write = wakeup_pipe[1];
+  signal(SIGINT, intHandler);
+
+  if (use_cyttsp5) {
+    evdev_worker_args cyttsp5_args = {.dev = cyttsp5,
+                                      .fd = cyttsp5_fd,
+                                      .data = cyttsp5_touches,
+                                      .out_mutex = &out_mutex,
+                                      .out_fd = out_fd2,
+                                      .wakeup_r = wakeup_pipe[0],
+                                      .wakeup_w = wakeup_pipe[1],
+                                      .handler = handle_cyttsp_events};
+    pthread_create(&cyttsp5_thread, NULL, evdev_worker, &cyttsp5_args);
+  }
 
   evdev_worker_args ws8100_pen_args = {.dev = ws8100_pen,
                                        .fd = ws8100_pen_fd,
@@ -750,12 +780,16 @@ int main() {
 exit:
   keepRunning = 0;
   write(wakeup_pipe[1], "\0", 1);
-  pthread_join(cyttsp5_thread, NULL);
+  if (use_cyttsp5) {
+    pthread_join(cyttsp5_thread, NULL);
+  }
   pthread_join(ws8100_pen_thread, NULL);
 cleanup_all:
-  libevdev_grab(cyttsp5, LIBEVDEV_UNGRAB);
-  libevdev_free(cyttsp5);
-  close(cyttsp5_fd);
+  if (grab_cyttsp5) {
+    libevdev_grab(cyttsp5, LIBEVDEV_UNGRAB);
+    libevdev_free(cyttsp5);
+    close(cyttsp5_fd);
+  }
 cleanup_ws8100:
   libevdev_grab(ws8100_pen, LIBEVDEV_UNGRAB);
   libevdev_free(ws8100_pen);
