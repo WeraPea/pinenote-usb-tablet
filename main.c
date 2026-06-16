@@ -482,7 +482,7 @@ int handle_ws8100_pen_events(struct input_event ev, void *data,
         buttons[1] &= ~(1 << bit);
       }
       pthread_mutex_lock(out_mutex);
-      if (write(out_fd, buttons, 2) != 2) {
+      if (write(out_fd, buttons, 2) != 2 && errno != ESHUTDOWN) {
         perror("Write failed");
         pthread_mutex_unlock(out_mutex);
         return -1;
@@ -537,7 +537,7 @@ int handle_cyttsp_events(struct input_event ev, void *data,
       uint16_t time = ev.time.tv_usec / 100 + ev.time.tv_sec * 10000;
       memcpy(&report[7], &time, 2);
 
-      if (write(out_fd, report, 9) != 9) {
+      if (write(out_fd, report, 9) != 9 && errno != ESHUTDOWN) {
         perror("Write failed");
         return -1;
       }
@@ -734,7 +734,7 @@ int main() {
     if (fds[0].revents & POLLIN) {
       while ((bytes = read(w9013, w9013_buffer, sizeof(w9013_buffer))) > 0) {
         pthread_mutex_lock(&out_mutex);
-        if (write(out_fd, w9013_buffer, bytes) != bytes) {
+        if (write(out_fd, w9013_buffer, bytes) != bytes && errno != ESHUTDOWN) {
           perror("Write failed");
           pthread_mutex_unlock(&out_mutex);
           goto exit;
