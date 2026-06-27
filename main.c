@@ -10,6 +10,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -234,19 +235,19 @@ out:
   return usbg_ret;
 }
 
-int initUSB(usbg_context *usb_ctx, bool use_cyttsp5) {
+int initUSB(usbg_context *usb_ctx, bool use_cyttsp5, uint16_t vendor,
+            uint16_t product) {
   int usbg_ret = -EINVAL;
 
-  usbg_gadget *g_iter;
-  struct usbg_gadget_attrs g_iter_attrs;
+  usbg_gadget *old_gadget = NULL;
   struct usbg_gadget_attrs g_attrs = {
       .bcdUSB = 0x0200,
       .bDeviceClass = USB_CLASS_PER_INTERFACE,
       .bDeviceSubClass = 0x00,
       .bDeviceProtocol = 0x00,
       .bMaxPacketSize0 = 64, /* Max allowed ep0 packet size */
-      .idVendor = USBG_VENDOR,
-      .idProduct = USBG_PRODUCT,
+      .idVendor = vendor,
+      .idProduct = product,
       .bcdDevice = 0x0100, /* Verson of device */
   };
   struct usbg_gadget_strs g_strs = {
@@ -284,29 +285,12 @@ int initUSB(usbg_context *usb_ctx, bool use_cyttsp5) {
     goto out1;
   }
 
-  g_iter = usbg_get_first_gadget(usb_ctx->s);
-  while (g_iter != NULL) {
-    usbg_ret = usbg_get_gadget_attrs(g_iter, &g_iter_attrs);
-    if (usbg_ret != USBG_SUCCESS) {
-      fprintf(stderr, "Error on USB get gadget attrs\n");
-      fprintf(stderr, "Error: %s : %s\n", usbg_error_name(usbg_ret),
-              usbg_strerror(usbg_ret));
+  old_gadget = usbg_get_gadget(usb_ctx->s, "pinenote-usb-tablet");
+  if (old_gadget) {
+    fprintf(stderr, "Removing leftover gadget\n");
+    usbg_ret = remove_gadget(old_gadget);
+    if (usbg_ret != USBG_SUCCESS)
       goto out2;
-    }
-
-    if (g_iter_attrs.idVendor == g_attrs.idVendor &&
-        g_iter_attrs.idProduct == g_attrs.idProduct) {
-      usbg_gadget *g_next = usbg_get_next_gadget(g_iter);
-
-      fprintf(stderr, "Removing leftover gadget\n");
-      usbg_ret = remove_gadget(g_iter);
-      if (usbg_ret != USBG_SUCCESS)
-        goto out2;
-
-      g_iter = g_next;
-    } else {
-      g_iter = usbg_get_next_gadget(g_iter);
-    }
   }
 
   usbg_ret = usbg_create_gadget(usb_ctx->s, "pinenote-usb-tablet", &g_attrs,
@@ -635,6 +619,8 @@ int main(int argc, char *argv[]) {
   pthread_t cyttsp5_thread;
   pthread_t ws8100_pen_thread;
   evdev_worker_args cyttsp5_args, ws8100_pen_args;
+  uint16_t vendor = USBG_VENDOR;
+  uint16_t product = USBG_PRODUCT;
 
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--use-touchscreen") == 0) {
@@ -642,6 +628,10 @@ int main(int argc, char *argv[]) {
       grab_cyttsp5 = true;
     } else if (strcmp(argv[i], "--grab-touchscreen") == 0) {
       grab_cyttsp5 = true;
+    } else if (strcmp(argv[i], "--vendor") == 0 && i + 1 < argc) {
+      vendor = (uint16_t)strtoul(argv[++i], NULL, 16);
+    } else if (strcmp(argv[i], "--product") == 0 && i + 1 < argc) {
+      product = (uint16_t)strtoul(argv[++i], NULL, 16);
     } else {
       printf("grabs and forwards PineNote's stylus and (optionally) "
              "touchscreen input.\n");
@@ -653,7 +643,7 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  if (initUSB(&usb_ctx, use_cyttsp5) < 0) {
+  if (initUSB(&usb_ctx, use_cyttsp5, vendor, product) < 0) {
     fprintf(stderr, "Failed to init usb gadget");
     goto cleanup_usb;
   }
